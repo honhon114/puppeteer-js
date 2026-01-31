@@ -1,72 +1,47 @@
-const puppeteer = require('puppeteer');
+const express = require("express");
+const puppeteer = require("puppeteer");
 
-async function scrapeWebsite() {
-    let browser;
+const app = express();
+app.use(express.json({ limit: "10mb" })); // html이 길어질 수 있어서 넉넉히
 
-    try {
-        console.log('Starting browser...');
+// Railway가 살아있는지 확인하는 엔드포인트
+app.get("/health", (req, res) => {
+  res.status(200).send("ok");
+});
 
-        // Launch browser
-        browser = await puppeteer.launch({
-            headless: true,
-            args: [
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage'
-            ]
-        });
+// (예시) HTML을 받아서 4:5(1080x1350) PNG로 렌더링해서 반환
+app.post("/render", async (req, res) => {
+  const { html } = req.body;
+  if (!html) return res.status(400).json({ error: "html is required" });
 
-        // Create new page
-        const page = await browser.newPage();
+  let browser;
+  try {
+    browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"],
+    });
 
-        // Set viewport size
-        await page.setViewport({ width: 1280, height: 720 });
+    const page = await browser.newPage();
 
-        // Navigate to website
-        console.log('Navigating to website...');
-        await page.goto('https://railway.com', {
-            waitUntil: 'networkidle2'
-        });
+    // ✅ 4:5 비율 = 1080 x 1350
+    await page.setViewport({ width: 1080, height: 1350, deviceScaleFactor: 2 });
 
-        // Get page title
-        const title = await page.title();
-        console.log('Page title:', title);
+    await page.setContent(html, { waitUntil: "networkidle0" });
 
-        // Get text content from h1
-        const heading = await page.$eval('h1', el => el.textContent);
-        console.log('Main heading:', heading);
+    const pngBuffer = await page.screenshot({ type: "png" });
 
-        // TODO: Add your scraping logic here
-        // Examples:
+    res.setHeader("Content-Type", "image/png");
+    res.status(200).send(pngBuffer);
+  } catch (e) {
+    console.error(e);
+    res.status(500).json({ error: String(e) });
+  } finally {
+    if (browser) await browser.close();
+  }
+});
 
-        // Get all links
-        // const links = await page.$$eval('a', links =>
-        //   links.map(link => ({
-        //     text: link.textContent,
-        //     href: link.href
-        //   }))
-        // );
-
-        // Fill out a form
-        // await page.type('#search-input', 'your search term');
-        // await page.click('#search-button');
-        // await page.waitForNavigation();
-
-        // Wait for specific element
-        // await page.waitForSelector('.results', { timeout: 5000 });
-
-        console.log('Scraping completed successfully!');
-
-    } catch (error) {
-        console.error('Error occurred:', error);
-    } finally {
-        // Always close the browser
-        if (browser) {
-            await browser.close();
-            console.log('Browser closed');
-        }
-    }
-}
-
-// Run the scraping function
-scrapeWebsite();
+// ✅ Railway는 PORT 환경변수로 포트를 줌. 이걸 반드시 써야 함.
+const PORT = process.env.PORT || 8080;
+app.listen(PORT, () => {
+  console.log(`Server listening on ${PORT}`);
+});
